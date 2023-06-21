@@ -1,0 +1,7 @@
+*.elf
+*.velf
+*.skprx
+out/
+inject.bin
+inject.o
+inject.txt

@@ -8,39 +8,39 @@ PROJECT := libssl-keylog
 CFLAGS += -Wl,-q -nostdlib
 
 
-SRC_KERNEL := kernel.c
-OBJ_KERNEL_DIRS := $(dir $(SRC_KERNEL:%.c=out/%.o))
-OBJS_KERNEL := $(SRC_KERNEL:%.c=out/%.o)
+SRC_KERNEL := kernel.c tai.c
+OBJS_KERNEL := kernel.o tai.o
+OBJS_KERNEL_363 := kernel.o tai-363.o
 
 LIBS_KERNEL += \
 	-ltaihenForKernel_stub -lSceDebugForDriver_stub \
 	-lSceIofilemgrForDriver_stub -lSceThreadmgrForDriver_stub \
-	-lSceModulemgrForKernel_stub -lSceModulemgrForDriver_stub \
-	-lSceSysmemForDriver_stub 
+	-lSceSysmemForDriver_stub  -lSceSysclibForDriver_stub
 
 
 all: package
 
-package: $(PROJECT).skprx
+package: $(PROJECT).skprx $(PROJECT)-363.skprx
 
 
-$(PROJECT).skprx: $(PROJECT)-kernel.velf
+%.skprx: %.velf
 	vita-make-fself -c -e kernel.yml $< $@
 
 %.velf: %.elf
 	$(STRIP) -g $<
 	vita-elf-create $< $@
 
-$(PROJECT)-kernel.elf: $(OBJS_KERNEL)
-	$(CC) $(CFLAGS) $^ $(LIBS_KERNEL) -o $@
+$(PROJECT).elf: $(OBJS_KERNEL)
+	$(CC) $(CFLAGS) $^ $(LIBS_KERNEL) -lSceModulemgrForKernel_stub -o $@
 
+$(PROJECT)-363.elf: $(OBJS_KERNEL_363)
+	$(CC) $(CFLAGS) $^ $(LIBS_KERNEL) -lSceModulemgrForKernel_363_stub -o $@
 
-$(OBJ_KERNEL_DIRS):
-	mkdir -p $@
-
-out/%.o : %.c | $(OBJ_KERNEL_DIRS)
+%.o : %.c | $(OBJ_KERNEL_DIRS)
 	$(CC) -c $(CFLAGS) -o $@ $<
 
+%-363.o : %.c | $(OBJ_KERNEL_DIRS)
+	$(CC) -c $(CFLAGS) -DVER_363 -o $@ $<
 
 
 
@@ -57,8 +57,9 @@ inject.txt: inject.o
 
 
 clean:
-	rm -f $(PROJECT)-kernel.velf $(PROJECT)-kernel.elf $(PROJECT).skprx $(OBJS_KERNEL)
-	rm -r $(abspath $(OBJ_KERNEL_DIRS))
+	rm -f $(PROJECT).velf $(PROJECT).elf $(PROJECT).skprx \
+		  $(PROJECT)-363.velf $(PROJECT)-363.elf $(PROJECT)-363.skprx \
+		  $(OBJS_KERNEL) tai-363.o
 
 
 push: $(PROJECT).skprx

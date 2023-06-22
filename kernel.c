@@ -7,16 +7,18 @@
 #include <psp2kern/io/fcntl.h>
 #include <psp2/sysmodule.h>
 
+#include "tai.h"
+#include "inject.h"
+
+#define MOD_LIST_SIZE (255)
+
 static tai_hook_ref_t open_ref;
 static SceUID open_id = -1;
 
 static tai_hook_ref_t sceSysmoduleLoadModule_hook_ref;
 static SceUID sceSysmoduleLoadModule_hook_id = -1;
+static SceUID keylogFD = -1;
 
-int strcmp(const char *a,const char *b){
-  if (! (*a | *b)) return 0;
-  return (*a!=*b) ? *a-*b : strcmp(++a,++b);
-}
 
 void print_hex(char* buf, char* out, int size) {
     for (int z = 0; z < size; z++) {
@@ -28,7 +30,7 @@ void print_hex(char* buf, char* out, int size) {
     *out++ = 0;
 }
 
-void tls1_keylog_hook(int pid, int modid) {
+void tls1_keylog_hook(int pid, int modid, int module_nid) {
     /*
         tls1_setup_key_block = 0x12950
 
@@ -38,13 +40,17 @@ void tls1_keylog_hook(int pid, int modid) {
         12a74 02 d1           bne        LAB_81012a7c
     */
 
-    const char patch[] = {
-        0xd4, 0xf8, 0xd0, 0x10, // ldr.w r1, [r4, #0xd0] // s->session
-        0x60, 0x6d, // ldr r0, [r4, #0x54] // s->s3
-        0x37, 0xf0, 0x78, 0xed // blx #0x37af4 // SceIoOpen
-    };
+    const char* patch;
+    ptrdiff_t offset;
+    int patch_size;
+    int err = get_tls_patch(&patch, &offset, &patch_size, module_nid);
+    if(err < 0) {
+        ksceKernelPrintf("Failed to find patch for %08x\n", module_nid);
+        return;
+    }
 
-    taiInjectDataForKernel(pid, modid, 0, 0x12a6c, patch, sizeof(patch));
+    int hnd = taiInjectDataForKernel(pid, modid, 0, offset, patch, patch_size);
+    ksceKernelPrintf("tls1_keylog_patch: %08x\n", hnd);
 }
 
 
@@ -56,11 +62,17 @@ SceUID hook_user_open(const char *path, int flags, SceMode mode, void *args) {
     ksceKernelMemcpyFromUser(client_random, path + 0xb8, sizeof(client_random));
     ksceKernelMemcpyFromUser(master_key, (char*)flags + 0x14, sizeof(master_key));
 
+    char buf[256];
     char client_random_hex[0x20*2+1];
     char master_key_hex[0x30*2+1];
     print_hex(client_random, client_random_hex, 0x20);
     print_hex(master_key, master_key_hex, 0x30);
-    ksceKernelPrintf("CLIENT_RANDOM %s %s\n", client_random_hex, master_key_hex);
+    int len = snprintf(buf, 256, "CLIENT_RANDOM %s %s\n", client_random_hex, master_key_hex);
+
+    ksceKernelPrintf(buf);
+    if(keylogFD > 0) {
+        ksceIoWrite(keylogFD, buf, len);
+    }
   } else {
     return TAI_CONTINUE(SceUID, open_ref, path, flags, mode, args);
   }
@@ -71,24 +83,17 @@ SceUID sceSysmoduleLoadModule_hook(SceSysmoduleModuleId id) {
     SceUID ret = TAI_CONTINUE(SceUID, sceSysmoduleLoadModule_hook_ref, id);
     if(id == SCE_SYSMODULE_HTTPS) {
         SceUID pid = ksceKernelGetProcessId();
-
-        int modidssize = 50;
-        SceUID modids[50];
-        int ret2 = ksceKernelGetModuleList(pid, 0x7FFFFFFF, 1, modids, &modidssize);
-        for(int i = 0; i < modidssize; i++) {
-            SceUID modid = modids[i];
-            SceKernelModuleInfo info;
-            info.size = sizeof(SceKernelModuleInfo);
-            ret2 = ksceKernelGetModuleInfo(pid, modid, &info);
-            if(ret2 < 0) {
-                ksceKernelPrintf("ksceKernelGetModuleInfo: %08x\n", ret2);
-                continue;
-            }
-
-            if(strncmp(info.module_name, "SceLibSsl", 26) == 0) {
-                tls1_keylog_hook(pid, modid);
-            }
+        tai_module_info_t info;
+        info.size = sizeof(tai_module_info_t);
+        int ret2 = get_tai_info(pid, "SceLibSsl", &info);
+        if(ret2 < 0) {
+            ksceKernelPrintf("get_tai_info: %08x\n", ret2);
+            return ret;
         }
+
+        ksceKernelPrintf("%s %08x %08x\n", info.name, info.module_nid, info.modid);
+
+        tls1_keylog_hook(pid, info.modid, info.module_nid);
     }
     return ret;
 }
@@ -110,6 +115,8 @@ int module_start(SceSize argc, const void *args) {
         0xCC67B6FD,      // NID specifying `sceIoOpen`
         hook_user_open
     );
+
+    keylogFD = ksceIoOpen("ux0:data/tls-keylog.txt", SCE_O_CREAT|SCE_O_APPEND|SCE_O_WRONLY, 6);
 }
 
 
@@ -119,5 +126,8 @@ int module_stop(SceSize args, void *argp) {
     }
     if(open_ref > 0) {
         taiHookReleaseForKernel(open_id, open_ref);
+    }
+    if(keylogFD > 0) {
+        ksceIoClose(keylogFD);
     }
 }

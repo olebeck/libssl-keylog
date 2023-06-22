@@ -62,6 +62,7 @@ int get_tls_patch(const char** patch, int* offset, int* patch_size, unsigned int
 		*offset = 0x14696;
 		break;
 	case 0xa0910f30: // 373-CEX, 373-TOOL
+	case 0xb1620f91: // itls
 	case 0x3d13b1d4: // 371-CEX, 371-TOOL
 	case 0xe0bce065: // 372-CEX, 372-DEX, 372-QAF
 		*patch = patch_0x81014696_0x8104ca78;

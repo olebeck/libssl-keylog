@@ -3,29 +3,16 @@ from git import Repo, Commit
 from io import BytesIO
 from typing import BinaryIO
 from elftools.elf.elffile import ELFFile
-import os
+import os, binascii
 
 
 psvita_elfs = Repo("psvita-elfs")
 
-ks = Ks(KS_ARCH_ARM, KS_MODE_THUMB)
+
 base = 0x81000000
 
-def make_patch(addr: int, SceIoOpen: int):
-    out = "{\n"
-    jump = SceIoOpen - (addr + 6)
-
-    for insn in [
-        "ldr.w r1, [r4, #0xd0]", # s->session
-        "ldr r0, [r4, #0x54]", # s->s3
-        f"blx #0x{jump:x}"
-        ]:
-        b = ks.asm(insn, 0, True)[0]
-        line = ", ".join([f"0x{a:02x}" for a in b])
-        out += f"\t{line}, // {insn}\n"
-    
-    out += "}"
-    return out
+def to_c_array(b: bytes):
+    return "{"+", ".join([f"0x{a:02x}" for a in b])+"}"
 
 class Patch:
     def __init__(self, addr: int, SceIoOpen: int, module_nid: int):
@@ -33,13 +20,33 @@ class Patch:
         self.SceIoOpen = SceIoOpen
         self.module_nid = module_nid
         self.versions = []
+        self.ks = Ks(KS_ARCH_ARM, KS_MODE_THUMB)
+        self.ks.sym_resolver = self.sym_resolver
     
     def patch_name(self):
         return f"patch_0x{self.addr:08x}_0x{self.SceIoOpen:08x}"
 
+    def sym_resolver(self, name: bytes, value):
+        name: str = name.decode("utf8")
+        if name == "SceIoOpen":
+            value[0] = self.SceIoOpen
+            return True
+        return False
+
+    def make(self):
+        b = self.ks.asm(
+            "ldr.w r1, [r4, #0xd0]\n" # s->session
+            "ldr r0, [r4, #0x54]\n" # s->s3
+            "blx SceIoOpen\n",
+            self.addr, True
+        )[0]
+        return to_c_array(b)
+
     def __hash__(self) -> int:
         return self.addr*self.SceIoOpen
 
+
+ks = Ks(KS_ARCH_ARM, KS_MODE_THUMB)
 
 # finds  tls1_setup_key_block based on a string pointer
 # then finds the end of the function by searching for the pop.w
@@ -157,8 +164,7 @@ def filter_patches(auto_patches: list[Patch]):
 def write_inject_h(patches_unique: list[Patch], patches: dict[int, Patch]):
     with open("inject.h", "w") as f:
         for patch in patches_unique:
-            data = make_patch(patch.addr, patch.SceIoOpen)
-            f.write(f"const char {patch.patch_name()}[] = {data};\n\n")
+            f.write(f"const char {patch.patch_name()}[] = {patch.make()};\n\n")
 
         f.write("""
 int get_tls_patch(const char** patch, int* offset, int* patch_size, unsigned int module_nid) {

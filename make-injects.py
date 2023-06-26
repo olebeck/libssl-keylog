@@ -17,7 +17,7 @@ def make_patch(addr: int, SceIoOpen: int):
 
     for insn in [
         "ldr.w r1, [r4, #0xd0]", # s->session
-        "ldr r0, [r4, #0x54]", # s->s3"
+        "ldr r0, [r4, #0x54]", # s->s3
         f"blx #0x{jump:x}"
         ]:
         b = ks.asm(insn, 0, True)[0]
@@ -120,9 +120,9 @@ def add_all_patches():
         file_contents = psvita_elfs.git.show('{}:{}'.format(commit.hexsha, "vs0/sys/external/libssl.suprx.elf")).encode("utf8", "surrogateescape")
         add_patch(BytesIO(file_contents), version)
 
-    libssl_373_dex = "lssl.suprx.elf"
-    if os.path.exists(libssl_373_dex):
-        with open(libssl_373_dex, "rb") as f:
+    libssl_itls = "lssl.suprx.elf"
+    if os.path.exists(libssl_itls):
+        with open(libssl_itls, "rb") as f:
             add_patch(f, "itls")
     return auto_patches
 

@@ -10,7 +10,7 @@
 #include "tai.h"
 #include "inject.h"
 
-#define MOD_LIST_SIZE (255)
+
 
 static tai_hook_ref_t open_ref;
 static SceUID open_id = -1;
@@ -50,7 +50,10 @@ void tls1_keylog_hook(int pid, int modid, int module_nid) {
     }
 
     int hnd = taiInjectDataForKernel(pid, modid, 0, offset, patch, patch_size);
-    ksceKernelPrintf("tls1_keylog_patch: %08x\n", hnd);
+    if(hnd < 0) {
+        ksceKernelPrintf("tls1_keylog_patch: %08x\n", hnd);
+        return;
+    }
 }
 
 

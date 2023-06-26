@@ -44,18 +44,6 @@ $(PROJECT)-363.elf: $(OBJS_KERNEL_363)
 
 
 
-inject.o: inject.s
-	arm-vita-eabi-as $^ -o $@
-
-inject.bin: inject.o
-	arm-vita-eabi-objcopy -O binary $^ $@
-
-inject.txt: inject.o
-	arm-vita-eabi-objdump -d --adjust-vma=0x81012a6c -marm -Mforce-thumb  $^ > $@
-
-
-
-
 clean:
 	rm -f $(PROJECT).velf $(PROJECT).elf $(PROJECT).skprx \
 		  $(PROJECT)-363.velf $(PROJECT)-363.elf $(PROJECT)-363.skprx \

@@ -68,7 +68,7 @@ int get_tai_info(int pid, char* name, tai_module_info_t *info) {
     for(int i = 0; i < count; i++) {
         SceUID modid = modlist[i];
         ret = ksceKernelGetModuleCB(modid, &sceinfo);
-            if(ret < 0) {
+        if(ret < 0) {
             ksceKernelPrintf("ksceKernelGetModuleCB: %08x\n", ret);
             return ret;
         }

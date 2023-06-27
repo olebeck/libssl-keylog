@@ -3,10 +3,7 @@ from git import Repo, Commit
 from io import BytesIO
 from typing import BinaryIO
 from elftools.elf.elffile import ELFFile
-import os, binascii
-
-
-psvita_elfs = Repo("psvita-elfs")
+import os, struct
 
 
 base = 0x81000000
@@ -31,16 +28,16 @@ class Patch:
         if name == "SceIoOpen":
             value[0] = self.SceIoOpen
             return True
+        print("missing symbol", name)
         return False
 
     def make(self):
-        b = self.ks.asm(
+        return to_c_array(self.ks.asm(
             "ldr.w r1, [r4, #0xd0]\n" # s->session
             "ldr r0, [r4, #0x54]\n" # s->s3
             "blx SceIoOpen\n",
             self.addr, True
-        )[0]
-        return to_c_array(b)
+        )[0])
 
     def __hash__(self) -> int:
         return self.addr*self.SceIoOpen
@@ -63,21 +60,83 @@ def find_patch_location(seg: bytes):
     return base + pos
 
 
-def get_nid_offsets(info_data: bytes, seg_data: bytes):
-    module_nid = int.from_bytes(info_data[0x34:0x38], "little")
-    funcCount = int.from_bytes(info_data[0xc2:0xc3], "little")
-    pNidTable = int.from_bytes(info_data[0xd0:0xd4], "little")
-    pEntryTable = int.from_bytes(info_data[0xd4:0xd8], "little")
+class Struct:
+    def __init__(self, data: bytes):
+        format, names = self._format()
+        tup = struct.unpack(format, data)
+        for name, value in zip(names, tup):
+            setattr(self, name, value)
 
-    nid_table = seg_data[pNidTable-base:pNidTable-base + (funcCount*4)]
-    entry_table = seg_data[pEntryTable-base:pEntryTable-base + (funcCount*4)]
+    @classmethod
+    def _format(cls):
+        format = ""
+        names = []
+        for key, _ in cls.__annotations__.items():
+            fmt = getattr(cls, key)
+            format += fmt
+            names.append(key)
+        return format, names
+    
+    @classmethod
+    def size(cls):
+        return struct.calcsize(cls._format()[0])
 
+class SceModuleInfo(Struct):
+    attributes: int = "b"
+    version: int = "h"
+    module_name: str = "27s"
+    type: int = "b"
+    gp_value: int = "I"
+    exportsStart: int = "I"
+    exportsEnd: int = "I"
+    importsTop: int = "I"
+    importsEnd: int = "I"
+    module_nid: int = "I"
+    tlsStart: int = "I"
+    tlsFileSize: int = "I"
+    tlsMemSize: int = "I"
+    module_start: int = "I"
+    module_stop: int = "I"
+    exidx_top: int = "I"
+    exidx_end: int = "I"
+    extab_start: int = "I"
+    extab_end: int = "I"
+
+class SceModuleImports(Struct):
+    size_: int = "h"
+    version: int = "h"
+    attribute: int = "h"
+    num_functions: int = "h"
+    num_vars: int = "h"
+    library_nid: int = "I"
+    library_name: int = "I"
+    func_nid_table: int = "I"
+    func_entry_table: int = "I"
+    var_nid_table: int = "I"
+    var_entry_table: int = "I"
+
+
+def get_nids(seg_data: bytes, module_info: SceModuleInfo):
+    importsData = seg_data[module_info.importsTop:module_info.importsEnd]
     nids = {}
-    for i in range(funcCount):
-        nid = int.from_bytes(nid_table[i*4:(i+1)*4], "little")
-        func = int.from_bytes(entry_table[i*4:(i+1)*4], "little")
-        nids[nid] = func
-    return nids, module_nid
+    off = 0
+    while off < len(importsData):
+        size = int.from_bytes(importsData[off:off+2], "little")
+        assert size == 0x24
+        
+        imports = SceModuleImports(importsData[off:off+size])
+        off += size
+        
+        entry_table_location = imports.func_entry_table-base
+        func_entry_table = seg_data[entry_table_location:entry_table_location+imports.num_functions*4]
+        nid_table_location = imports.func_nid_table-base
+        func_nid_table = seg_data[nid_table_location:nid_table_location+imports.num_functions*4]
+
+        for i in range(imports.num_functions):
+            nid = int.from_bytes(func_nid_table[i*4:(i+1)*4], "little")
+            func = int.from_bytes(func_entry_table[i*4:(i+1)*4], "little")
+            nids[nid] = func
+    return nids
 
 
 # automatically finds the patch location, where the SceIoOpen stub is
@@ -88,12 +147,13 @@ def find_patch(elf: ELFFile):
     seg = elf.get_segment(segment_num)
     seg_data: bytes = seg.data()
     
-    info_data = seg_data[info_offset:info_offset+0xdc]
-    nids, module_nid = get_nid_offsets(info_data, seg_data)
+    module_info = SceModuleInfo(seg_data[info_offset:info_offset+SceModuleInfo.size()])
+    nids = get_nids(seg_data, module_info)
+
     SceIoOpen = nids[0x6C60AC61]
 
     location = find_patch_location(seg_data)
-    return Patch(location, SceIoOpen, module_nid)
+    return Patch(location, SceIoOpen, module_info.module_nid)
 
 
 # versions to look at
@@ -121,11 +181,13 @@ def add_all_patches():
         patch.versions.append(version)
         auto_patches.append(patch)
 
+    psvita_elfs = Repo("psvita-elfs")
     for version in versions:
         head = psvita_elfs.heads[version]
         commit: Commit = head.commit
         file_contents = psvita_elfs.git.show('{}:{}'.format(commit.hexsha, "vs0/sys/external/libssl.suprx.elf")).encode("utf8", "surrogateescape")
         add_patch(BytesIO(file_contents), version)
+    psvita_elfs.close()
 
     libssl_itls = "lssl.suprx.elf"
     if os.path.exists(libssl_itls):
@@ -166,10 +228,8 @@ def write_inject_h(patches_unique: list[Patch], patches: dict[int, Patch]):
         for patch in patches_unique:
             f.write(f"const char {patch.patch_name()}[] = {patch.make()};\n\n")
 
-        f.write("""
-int get_tls_patch(const char** patch, int* offset, int* patch_size, unsigned int module_nid) {
-    switch(module_nid) {
-""")
+        f.write("\nint get_tls_patch(const char** patch, int* offset, int* patch_size, unsigned int module_nid) {\n")
+        f.write("    switch(module_nid) {\n")
 
         for patch in patches_unique:
             for module_nid in patch.module_nid:

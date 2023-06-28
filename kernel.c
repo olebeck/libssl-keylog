@@ -15,8 +15,6 @@
 static tai_hook_ref_t open_ref;
 static SceUID open_id = -1;
 
-static tai_hook_ref_t sceSysmoduleLoadModule_hook_ref;
-static SceUID sceSysmoduleLoadModule_hook_id = -1;
 static SceUID keylogFD = -1;
 
 
@@ -82,33 +80,38 @@ SceUID hook_user_open(const char *path, int flags, SceMode mode, void *args) {
 }
 
 
-SceUID sceSysmoduleLoadModule_hook(SceSysmoduleModuleId id) {
-    SceUID ret = TAI_CONTINUE(SceUID, sceSysmoduleLoadModule_hook_ref, id);
-    if(id == SCE_SYSMODULE_HTTPS) {
-        SceUID pid = ksceKernelGetProcessId();
+static int hk = 0;
+static tai_hook_ref_t lfp_hook;
+// load module for pid (0 to get), running in kernel context, path is in kernel
+static SceUID load_for_pid_patched(int pid, const char *path, uint32_t flags, int *ptr_to_four) {
+    char* is_libssl = strstr(path, "libssl.suprx");
+
+    int res = TAI_CONTINUE(SceUID, lfp_hook, pid, path, flags, ptr_to_four);
+
+    if(is_libssl != NULL) {
         tai_module_info_t info;
         info.size = sizeof(tai_module_info_t);
         int ret2 = get_tai_info(pid, "SceLibSsl", &info);
         if(ret2 < 0) {
             ksceKernelPrintf("get_tai_info: %08x\n", ret2);
-            return ret;
+            return res;
         }
 
         ksceKernelPrintf("%s %08x %08x\n", info.name, info.module_nid, info.modid);
-
         tls1_keylog_hook(pid, info.modid, info.module_nid);
     }
-    return ret;
+
+	return res;
 }
 
 
 void _start() __attribute__ ((weak, alias ("module_start")));
 int module_start(SceSize argc, const void *args) {
-    sceSysmoduleLoadModule_hook_id = taiHookFunctionExportForKernel(KERNEL_PID,
-        &sceSysmoduleLoadModule_hook_ref,
-        "SceSysmodule", 0x03FCF19D, 0x79A0160A,
-        sceSysmoduleLoadModule_hook
-    );
+    int modid = ksceKernelSearchModuleByName("SceKernelModulemgr");
+    if (modid > 0)
+        hk = taiHookFunctionOffsetForKernel(KERNEL_PID, &lfp_hook, modid, 0, 0x21ec, 1, load_for_pid_patched);
+    if (modid < 0 || hk < 0)
+        return SCE_KERNEL_START_FAILED;
 
     // hook to get a way to talk to the kernel module from the patch
     open_id = taiHookFunctionExportForKernel(KERNEL_PID,      // Kernel process
@@ -124,8 +127,8 @@ int module_start(SceSize argc, const void *args) {
 
 
 int module_stop(SceSize args, void *argp) {
-    if(sceSysmoduleLoadModule_hook_id > 0) {
-        taiHookReleaseForKernel(sceSysmoduleLoadModule_hook_id, sceSysmoduleLoadModule_hook_ref);
+    if(hk > 0) {
+		taiHookReleaseForKernel(hk, lfp_hook);
     }
     if(open_ref > 0) {
         taiHookReleaseForKernel(open_id, open_ref);

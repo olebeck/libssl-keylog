@@ -15,7 +15,8 @@ OBJS_KERNEL_363 := kernel.o tai-363.o
 LIBS_KERNEL += \
 	-ltaihenForKernel_stub -lSceDebugForDriver_stub \
 	-lSceIofilemgrForDriver_stub -lSceThreadmgrForDriver_stub \
-	-lSceSysmemForDriver_stub  -lSceSysclibForDriver_stub
+	-lSceSysmemForDriver_stub  -lSceSysclibForDriver_stub \
+	-lSceModulemgrForDriver_stub
 
 
 all: package

@@ -37,12 +37,15 @@ $(PROJECT).elf: $(OBJS_KERNEL)
 $(PROJECT)-363.elf: $(OBJS_KERNEL_363)
 	$(CC) $(CFLAGS) $^ $(LIBS_KERNEL) -lSceModulemgrForKernel_363_stub -o $@
 
-%.o : %.c | $(OBJ_KERNEL_DIRS)
+%.o : %.c inject.h | $(OBJ_KERNEL_DIRS)
 	$(CC) -c $(CFLAGS) -o $@ $<
 
 %-363.o : %.c | $(OBJ_KERNEL_DIRS)
 	$(CC) -c $(CFLAGS) -DVER_363 -o $@ $<
 
+
+inject.h: ssl-injects.py
+	python ssl-injects.py
 
 
 clean:

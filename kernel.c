@@ -41,7 +41,7 @@ void tls1_keylog_hook(int pid, int modid, int module_nid) {
     const char* patch;
     ptrdiff_t offset;
     int patch_size;
-    int err = get_tls_patch(&patch, &offset, &patch_size, module_nid);
+    int err = get_SSLKeylogPatch(&patch, &offset, &patch_size, module_nid);
     if(err < 0) {
         ksceKernelPrintf("Failed to find patch for %08x\n", module_nid);
         return;

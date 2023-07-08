@@ -7,3 +7,4 @@ inject.o
 inject.txt
 lssl.suprx
 vita-unmake-fself.exe
+__pycache__

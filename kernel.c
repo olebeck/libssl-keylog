@@ -28,28 +28,21 @@ void print_hex(char* buf, char* out, int size) {
     *out++ = 0;
 }
 
-void tls1_keylog_hook(int pid, int modid, int module_nid) {
-    /*
-        tls1_setup_key_block = 0x12950
+typedef int (*PatchGet)(const char **patch, int *offset, int *patch_size, unsigned int module_nid);
 
-        12a6c 1d 9a           ldr        r2,[sp,#__stack_chk]
-        12a6e da f8 00 10     ldr.w      r1,[r10,#0x0]
-        12a72 91 42           cmp        r1,r2
-        12a74 02 d1           bne        LAB_81012a7c
-    */
-
+void apply_patch(int pid, int modid, int module_nid, PatchGet get_func, const char* name) {
     const char* patch;
     ptrdiff_t offset;
     int patch_size;
-    int err = get_SSLKeylogPatch(&patch, &offset, &patch_size, module_nid);
+    int err = get_func(&patch, &offset, &patch_size, module_nid);
     if(err < 0) {
-        ksceKernelPrintf("Failed to find patch for %08x\n", module_nid);
+        ksceKernelPrintf("%s not found for %08x module nid\n", name, module_nid);
         return;
     }
 
     int hnd = taiInjectDataForKernel(pid, modid, 0, offset, patch, patch_size);
     if(hnd < 0) {
-        ksceKernelPrintf("tls1_keylog_patch: %08x\n", hnd);
+        ksceKernelPrintf("%s: %08x\n", name, hnd);
         return;
     }
 }
@@ -57,6 +50,14 @@ void tls1_keylog_hook(int pid, int modid, int module_nid) {
 
 // this receives the client_random and master_key from the patch
 SceUID hook_user_open(const char *path, int flags, SceMode mode, void *args) {
+    if(path < 0x100) {
+        int lib = (int)path;
+        int func = flags;
+        int reason = (int)mode;
+        ksceKernelPrintf("SSL ERROR: %d %d %d\n", lib, func, reason);
+        return 0;
+    }
+
   if(flags > 0x81000000) { // flags is an address when called from the patch
     char client_random[0x20];
     char master_key[0x30];
@@ -98,7 +99,9 @@ static SceUID load_for_pid_patched(int pid, const char *path, uint32_t flags, in
         }
 
         ksceKernelPrintf("%s %08x %08x\n", info.name, info.module_nid, info.modid);
-        tls1_keylog_hook(pid, info.modid, info.module_nid);
+        apply_patch(pid, info.modid, info.module_nid, get_SSLKeylogPatch, "ssl keylog patch");
+        apply_patch(pid, info.modid, info.module_nid, get_SSLPrintErrorsPatch, "ssl print errors");
+        apply_patch(pid, info.modid, info.module_nid, get_SSLNoVerifyPatch, "ssl no verify");
     }
 
 	return res;

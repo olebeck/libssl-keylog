@@ -126,7 +126,13 @@ class Patch:
     _code: str = ""
     _imports: dict[str, int] = {}
 
-    module_info: SceModuleInfo
+    def patch_name(self) -> str:
+        raise "unimplemented"
+    
+    @staticmethod
+    def find(data: bytes) -> tuple[int, dict[str, int]]:
+        raise "unimplemented"
+
 
     def __init__(self, addr: int, module_info: SceModuleInfo, syms: dict[str,int]):
         self.addr = addr
@@ -136,30 +142,6 @@ class Patch:
         self.versions = []
         self.ks = Ks(KS_ARCH_ARM, KS_MODE_THUMB)
         self.ks.sym_resolver = self._sym_resolver
-    
-    def patch_name(self) -> str:
-        raise "unimplemented"
-    
-    @staticmethod
-    def find(data: bytes) -> tuple[int, dict[str, int]]:
-        raise "unimplemented"
-
-    def _sym_resolver(self, name: bytes, value):
-        name: str = name.decode("utf8")
-        addr = self.syms.get(name)
-        if addr is None:
-            print("missing symbol", name)
-            return False
-        if addr < BASE:
-            addr += BASE
-        value[0] = addr
-        return True
-
-    def make(self):
-        return to_c_array(self.ks.asm(self._code, self.addr, True)[0])
-
-    def __hash__(self) -> int:
-        return self.addr*hash(frozenset(self.syms.items()))
 
     @classmethod
     def create(cls, r: BinaryIO):
@@ -180,6 +162,25 @@ class Patch:
         obj = cls(addr, module_info, syms)
         return obj
 
+    def _sym_resolver(self, name: bytes, value):
+        name: str = name.decode("utf8")
+        addr = self.syms.get(name)
+        if addr is None:
+            print("missing symbol", name)
+            return False
+        if addr < BASE:
+            print("wrong base", name)
+            return False
+        value[0] = addr
+        return True
+
+    def make(self):
+        data, _ = self.ks.asm(self._code, self.addr, True)
+        return to_c_array(data)
+
+    def __hash__(self) -> int:
+        return self.addr*hash(frozenset(self.syms.items()))
+
 
 
 versions = [
@@ -196,8 +197,11 @@ versions = [
     "373-CEX", "373-TOOL",
     "374-CEX",   
 ]
-def generate_all_patches(classes: list[Patch]) -> str:
+
+def generate_all_patches(*classes: Patch) -> str:
     all_patches: dict[str, list[Patch]] = defaultdict(list)
+    
+    # create patches for each firmware version
     psvita_elfs = Repo("psvita-elfs")
     for version in versions:
         commit: Commit = psvita_elfs.heads[version].commit
@@ -208,16 +212,18 @@ def generate_all_patches(classes: list[Patch]) -> str:
             all_patches[cls.__name__].append(patch)
     psvita_elfs.close()
 
+    # create patches for extra elfs
     for cls in classes:
         for filename in cls._extra_files:
             with open(filename, "rb") as f:
                 patch = cls.create(f)
                 patch.versions.append(filename.split(".")[0])
                 all_patches[cls.__name__].append(patch)
-    
+
     # filtering
 
     # patches for the same nid
+    # asserts that same module nid can all use the same patch
     patches_by_nid: dict[str, dict[int, Patch]] = defaultdict(dict)
     for name, patches in all_patches.items():
         by_nid = patches_by_nid[name]
@@ -229,48 +235,54 @@ def generate_all_patches(classes: list[Patch]) -> str:
             else:
                 by_nid[patch.module_info.module_nid] = patch
 
-    # patches that are not the same address and symbols
+    # filters for patches that are not the same address and symbols
     patches_unique: dict[str,list[Patch]] = defaultdict(list)
     for name, patches in patches_by_nid.items():
         for patch in patches.values():
             exists = len([p for p in patches_unique[name] if hash(p) == hash(patch)]) > 0
             if not exists:
+                matches = [a for a in all_patches[name] if hash(patch) == hash(a)]
+                patch.module_nids = set([match.module_info.module_nid for match in matches])
                 patches_unique[name].append(patch)
-
-    # put all module_nids that this patch works for in the patch
-    for name, patches in patches_unique.items():
-        for patch in patches:
-            matches = [a for a in all_patches[name] if hash(patch) == hash(a)]
-            patch.module_nids = set([match.module_info.module_nid for match in matches])
 
 
     # generate code
 
     out = ""
-    out += "//AUTO GENERATED DONT EDIT"
+    t = 0
+    def wo(s: str, i: int = 0):
+        nonlocal out
+        nonlocal t
+        if len(s)>0 and s[-1] == "}":
+            t-=1
+        out += ("\t"*(t+i)) + s +  "\n"
+        if len(s)>0 and s[-1] == "{":
+            t+=1
+
+    wo("// AUTO GENERATED DONT EDIT")
     for name, patches in patches_unique.items():
-        out += f"\n\n// {name}\n"
+        wo(f"\n\n// {name}")
         created_patches = {}
         for patch in patches:
             if created_patches.get(patch.patch_name()):
                 continue
-            out += f"const char {patch.patch_name()}[] = {patch.make()};\n\n"
+            wo(f"const char {patch.patch_name()}[] = {patch.make()};\n")
             created_patches[patch.patch_name()] = True
 
-        out += f"int get_{patch.__class__.__name__}(const char** patch, int* offset, int* patch_size, unsigned int module_nid) {{\n"
-        out += "\tswitch(module_nid) {\n"
-
+        wo(f"int get_{patch.__class__.__name__}(const char** patch, int* offset, int* patch_size, unsigned int module_nid) {{")
+        wo("switch(module_nid) {")
         for patch in patches:
             by_nid = patches_by_nid[name]
             for module_nid in patch.module_nids:
-                out += f"\tcase 0x{module_nid:08x}: // {', '.join(by_nid[module_nid].versions)}\n"
+                wo(f"case 0x{module_nid:08x}: // {', '.join(by_nid[module_nid].versions)}", -1)
+            wo(f"*patch = {patch.patch_name()};")
+            wo(f"*patch_size = sizeof({patch.patch_name()});")
+            wo(f"*offset = 0x{patch.addr-BASE:x};")
+            wo("break;")
+        wo("default:", -1)
+        wo("return -1;")
+        wo("}")
+        wo("return 0;")
+        wo("}")
 
-            out += f"\t\t*patch = {patch.patch_name()};\n"
-            out += f"\t\t*patch_size = sizeof({patch.patch_name()});\n"
-            out += f"\t\t*offset = 0x{patch.addr-BASE:x};\n"
-            out += "\t\tbreak;\n"
-
-        out += "\tdefault:\n\t\treturn -1;\n"
-        out += "\t}\n\treturn 0;\n"
-        out += "}\n"
     return out

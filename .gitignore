@@ -8,3 +8,5 @@ inject.txt
 lssl.suprx
 vita-unmake-fself.exe
 __pycache__
+*.a
+.vscode/settings.json

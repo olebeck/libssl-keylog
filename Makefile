@@ -4,55 +4,46 @@ CC := arm-vita-eabi-gcc
 CXX := arm-vita-eabi-g++
 STRIP := arm-vita-eabi-strip
 
-PROJECT := libssl-keylog
 CFLAGS += -Wl,-q -nostdlib
 
-
-SRC_KERNEL := kernel.c tai.c
-OBJS_KERNEL := kernel.o tai.o
-OBJS_KERNEL_363 := kernel.o tai-363.o
+SRC_LIBSSL_KEYLOG := tai.c patch.c inject.c tls-keylog.c libssl-keylog-main.c
+SRC_PSN_REDIRECT := tai.c patch.c inject.c http-rewrite.c xmpp-rewrite.c psn-redirect-main.c
+SRC_PACKET_CAPTURE := tai.c patch.c inject.c tls-keylog.c tcp-proxy.c packet-capture-main.c
 
 LIBS_KERNEL += \
-	-ltaihenForKernel_stub -lSceDebugForDriver_stub \
+	-ltaihenForKernel_stub -ltaihenModuleUtils_stub \
+	-lSceDebugForDriver_stub \
 	-lSceIofilemgrForDriver_stub -lSceThreadmgrForDriver_stub \
 	-lSceSysmemForDriver_stub  -lSceSysclibForDriver_stub \
-	-lSceModulemgrForDriver_stub
+	-lSceModulemgrForDriver_stub -lSceNetPsForDriver_stub
 
-
-all: package
-
-package: $(PROJECT).skprx $(PROJECT)-363.skprx
-
+all: libssl-keylog.skprx psn-redirect.skprx capture-proxy.a
 
 %.skprx: %.velf
-	vita-make-fself -c -e kernel.yml $< $@
+	vita-make-fself -c -e libssl-keylog.yml $< $@
 
 %.velf: %.elf
 	$(STRIP) -g $<
 	vita-elf-create $< $@
 
-$(PROJECT).elf: $(OBJS_KERNEL)
-	$(CC) $(CFLAGS) $^ $(LIBS_KERNEL) -lSceModulemgrForKernel_stub -o $@
+libssl-keylog.elf: $(SRC_LIBSSL_KEYLOG:.c=.o)
+	$(CC) $(CFLAGS) $^ $(LIBS_KERNEL) -o $@
 
-$(PROJECT)-363.elf: $(OBJS_KERNEL_363)
-	$(CC) $(CFLAGS) $^ $(LIBS_KERNEL) -lSceModulemgrForKernel_363_stub -o $@
+psn-redirect.elf: $(SRC_PSN_REDIRECT:.c=.o)
+	$(CC) $(CFLAGS) $^ $(LIBS_KERNEL) -lSceSysrootForDriver_stub -o $@
 
-%.o : %.c inject.h | $(OBJ_KERNEL_DIRS)
-	$(CC) -c $(CFLAGS) -o $@ $<
+capture-proxy.a: $(SRC_PACKET_CAPTURE:.c=.o)
+	ar rcs $@ $^
 
-%-363.o : %.c | $(OBJ_KERNEL_DIRS)
-	$(CC) -c $(CFLAGS) -DVER_363 -o $@ $<
-
-
-inject.h: ssl-injects.py
-	python ssl-injects.py
-
+inject.h: injects.py
+	python injects.py
 
 clean:
-	rm -f $(PROJECT).velf $(PROJECT).elf $(PROJECT).skprx \
-		  $(PROJECT)-363.velf $(PROJECT)-363.elf $(PROJECT)-363.skprx \
-		  $(OBJS_KERNEL) tai-363.o
-
+	rm -f capture-proxy.a
+	rm -f libssl-keylog.elf libssl-keylog.velf libssl-keylog.skprx
+	rm -f $(SRC_LIBSSL_KEYLOG:.c=.o)
+	rm -f $(SRC_PACKET_CAPTURE:.c=.o)
+	rm -f $(SRC_PSN_REDIRECT:.c=.o)
 
 push: $(PROJECT).skprx
 	curl -T $(PROJECT).skprx ftp://${VITAIP}:1337/ur0:/tai/

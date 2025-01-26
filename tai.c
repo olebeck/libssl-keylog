@@ -1,5 +1,4 @@
 #include "tai.h"
-#include <psp2kern/kernel/modulemgr.h>
 #include <psp2kern/kernel/sysclib.h>
 #include <psp2kern/kernel/debug.h>
 
@@ -23,11 +22,35 @@
 
 #define MOD_LIST_SIZE (256)
 
-#ifdef VER_363
-#undef ksceKernelGetModuleInternal
-int ksceKernelGetModuleInternal(SceUID modid, void **info);
-#define ksceKernelGetModuleCB ksceKernelGetModuleInternal
-#endif
+
+int (*_ksceKernelGetModuleCB)(SceUID modid, void** info);
+int ksceKernelGetModuleCB(SceUID modid, void** info) {
+    return _ksceKernelGetModuleCB(modid, info);
+}
+
+int (*_ksceKernelGetModuleList)(SceUID pid, int flags1, int flags2, SceUID *modids, SceSize *num);
+int ksceKernelGetModuleList(SceUID pid, int flags1, int flags2, SceUID *modids, SceSize *num) {
+    return _ksceKernelGetModuleList(pid, flags1, flags2, modids, num);
+}
+
+int module_get_export_func(SceUID pid, const char *modname, uint32_t libnid, uint32_t funcnid, uintptr_t *func);
+
+void tai_resolve_nid(char* module, uint32_t lib_360, uint32_t func_360, uint32_t lib_365, uint32_t func_365, void* func) {
+    int ret;
+    ret = module_get_export_func(KERNEL_PID, module, lib_360, func_360, func);
+    if(ret < 0) {
+        ret = module_get_export_func(KERNEL_PID, module, lib_365, func_365, func);
+    }
+    if(ret < 0) {
+        ksceKernelPrintf("tai_resolve_nid %s %08x", module, ret);
+    }
+}
+
+void tai_init() {
+    tai_resolve_nid("SceKernelModulemgr", 0xC445FA63, 0xFE303863, 0x92C9FFC2, 0x37512E29, &_ksceKernelGetModuleCB);
+    tai_resolve_nid("SceKernelModulemgr", 0xC445FA63, 0x97CF7B4E, 0x92C9FFC2, 0xB72C75A4, &_ksceKernelGetModuleList);
+}
+
 
 int sce_to_tai_module_info(SceUID pid, void *sceinfo, tai_module_info_t *taiinfo) {
     char *info;

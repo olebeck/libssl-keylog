@@ -24,15 +24,15 @@ void tls_no_verify_patch_func(int pid, const char* path) {
         return;
     }
 
-    tai_module_info_t info;
-    info.size = sizeof(tai_module_info_t);
-    int ret = get_tai_info(pid, "SceLibSsl", &info);
+    tai_module_info_t ssl_info;
+    ssl_info.size = sizeof(tai_module_info_t);
+    int ret = get_tai_info(pid, "SceLibSsl", &ssl_info);
     if(ret < 0) {
         ksceKernelPrintf("get_tai_info SceLibSsl: %08x\n", ret);
         return;
     }
 
-    apply_patch(pid, info.modid, info.module_nid, get_SSLNoVerifyPatch, "ssl no verify");
+    apply_patch(pid, ssl_info.modid, ssl_info.module_nid, get_SSLNoVerifyPatch, "ssl no verify");
 }
 
 void np_matching2_port_patch(int pid, const char* path) {
@@ -55,7 +55,7 @@ int module_start(SceSize argc, const void *args) {
     add_patch_func(tls_no_verify_patch_func);
     add_patch_func(np_matching2_port_patch);
 
-    http_rewrite_init(&replacements, ARRAY_LEN(replacements));
+    http_rewrite_init(replacements, ARRAY_LEN(replacements));
     xmpp_rewrite_init(xmpp_replacement, 5223);
 
     return SCE_KERNEL_START_SUCCESS;

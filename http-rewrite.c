@@ -53,8 +53,8 @@ int sceAppMgrIsNonGameProgram_hook(char* out_user, char* serverName_user, int fl
         }
 
         for(int i = 0; i < s_replacements_num; i++) {
-            const replacement_t* r = &s_replacements[i];
-            ret = replaceDomain(serverName, out_p, serverNameLength, r->original_domain, r->replacement_domain);
+            const replacement_t r = s_replacements[i];
+            ret = replaceDomain(serverName, out_p, serverNameLength, r.original_domain, r.replacement_domain);
             if(ret > 0) break;
         }
 

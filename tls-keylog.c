@@ -37,7 +37,7 @@ SceUID hook_user_open(const char *path, int flags, SceMode mode, void *args) {
 
     if(flags > 0x81000000) { // flags is an address when called from the patch
         do_ssl_keylog(path, (const char*)flags);
-        return 0;
+        return (SceUID)path;
     } else {
         return TAI_CONTINUE(SceUID, open_ref, path, flags, mode, args);
     }
@@ -107,7 +107,7 @@ void tls_keylog_patch_func(int pid, const char* path) {
     ssl_info.size = sizeof(tai_module_info_t);
     int ret = get_tai_info(pid, "SceLibSsl", &ssl_info);
     if(ret < 0) {
-        ksceKernelPrintf("get_tai_info: %08x\n", ret);
+        ksceKernelPrintf("get_tai_info SceLibSsl: %08x\n", ret);
         return;
     }
 

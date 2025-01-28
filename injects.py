@@ -69,6 +69,8 @@ class SSLNoVerifyPatch(Patch):
     def patch_name(self) -> str:
         return f"ssl_no_verify"
 
+    # r5 = 0 is before so its 0
+    # set ssl->verify_mode = 0
     _code = (
         "str.w r5,[r9,#0xd4]\n"
     )
@@ -77,22 +79,6 @@ class SSLNoVerifyPatch(Patch):
     def find_patch_location(data: bytes) -> tuple[int, dict[str, int]]:
         pos = data.find(b'\x4f\xf0\xff\x34\x17\xb9\xd9\xf8\x00\x01\x47\x6f')
         return BASE + pos, {}
-
-
-class LoadForPidAddress(Patch):
-    _filename = "os0/kd/modulemgr.skprx.elf"
-    def patch_name(self) -> str:
-        return f"load_for_pid"
-    _code = None
-    _want_exports = True
-    @staticmethod
-    def find_patch_location_with_exports(data: bytes, exports) -> tuple[int, dict[str, int]]:
-        addr_ksceKernelLoadModule = exports[0xD4A60A52][0x86D8D634]
-        offset_ksceKernelLoadModule = addr_ksceKernelLoadModule - BASE - 1
-        for insn in cs.disasm(data[offset_ksceKernelLoadModule:], offset_ksceKernelLoadModule, 20):
-            if insn.mnemonic == "bl":
-                off = insn.operands[0].value.imm
-                return off + BASE, {}
 
 
 class PsnRedirectPatch(Patch):

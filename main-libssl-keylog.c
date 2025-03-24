@@ -1,21 +1,21 @@
 #include <taihen.h>
 #include <psp2kern/kernel/modulemgr.h>
+#include <psp2kern/kernel/debug.h>
+#include <psp2kern/kernel/threadmgr.h>
+#include <psp2kern/kernel/sysmem.h>
+#include <psp2kern/io/stat.h>
+#include <psp2kern/io/fcntl.h>
+#include <psp2kern/net/net.h>
+#include <stdbool.h>
 
 #include "util.h"
-#include "patch.h"
 #include "tls-keylog.h"
-#include "tcp-proxy.h"
-extern unsigned long long account_key;
+#include "patch.h"
 
 void _start() __attribute__ ((weak, alias ("module_start")));
 int module_start(SceSize argc, const void *args) {
     patch_init();
-
-    DEFINE_SCE_NET_SOCKADDR_IN(keylog_addr, 192,168,178,173, 1235);
-    tls_keylog_init(&keylog_addr, account_key);
-
-    DEFINE_SCE_NET_SOCKADDR_IN(proxy_addr, 192,168,178,173, 1234);
-    proxy_init(&proxy_addr, account_key);
+    tls_keylog_init(true);
 
     return SCE_KERNEL_START_SUCCESS;
 }
@@ -23,5 +23,4 @@ int module_start(SceSize argc, const void *args) {
 int module_stop(SceSize args, void *argp) {
     patch_release();
     tls_keylog_release();
-    proxy_release();
 }

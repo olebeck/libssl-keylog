@@ -167,6 +167,13 @@ class Patch:
     def patch_name(self) -> str:
         raise "unimplemented"
     
+    def _patch_name(self) -> str:
+        name = self.patch_name()
+        name += f"_0x{self.addr:08x}"
+        for key in sorted(self.syms.keys()):
+            name += f"_0x{self.syms[key]:08x}"
+        return name
+
     @staticmethod
     def find_patch_location(data: bytes) -> tuple[int, dict[str, int]]:
         raise "unimplemented"
@@ -246,26 +253,24 @@ versions = [
 def generate_all_patches(*classes: Patch) -> str:
     all_patches: dict[str, list[Patch]] = defaultdict(list)
 
-    files = {}
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-    with ThreadPoolExecutor(max_workers=10) as executor:
-        for future in as_completed(
-            executor.submit(lambda version, filename: (version + "_" + filename, git_contents(version, filename)), version, filename)
-            for version in versions
-            for filename in set(cls._filename for cls in classes)
-        ):
-            try:
-                key, val = future.result()
-                files[key] = val
-            except Exception as e:
-                print(f"Error processing: {e}")
-                return
-
     # create patches for each firmware version
     for version in versions:
+        files = {}
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            for future in as_completed(
+                executor.submit(lambda filename: (filename, git_contents(version, filename)), filename)
+                for filename in set(cls._filename for cls in classes)
+            ):
+                try:
+                    key, val = future.result()
+                    files[key] = val
+                except Exception as e:
+                    print(f"Error processing: {e}")
+                    return
         for cls in classes:
             print(version, cls.__name__)
-            data = BytesIO(files[version+"_"+cls._filename])
+            data = BytesIO(files[cls._filename])
             patch = cls.create(data)
             patch.versions.append(version)
             all_patches[cls.__name__].append(patch)
@@ -340,10 +345,10 @@ def generate_all_patches(*classes: Patch) -> str:
         for patch in patches:
             if patch._code is None:
                 continue
-            if created_patches.get(patch.patch_name()):
+            if created_patches.get(patch._patch_name()):
                 continue
-            woc(f"const char {patch.patch_name()}[] = {patch.make()};\n")
-            created_patches[patch.patch_name()] = True
+            woc(f"const char {patch._patch_name()}[] = {patch.make()};\n")
+            created_patches[patch._patch_name()] = True
 
         func_def = f"int get_{patch.__class__.__name__}(const char** patch, int* offset, int* patch_size, unsigned int module_nid)"
         woh(f"{func_def};")
@@ -357,8 +362,8 @@ def generate_all_patches(*classes: Patch) -> str:
                 woc(f"*patch = 0;")
                 woc(f"*patch_size = 0;")
             else:
-                woc(f"*patch = {patch.patch_name()};")
-                woc(f"*patch_size = sizeof({patch.patch_name()});")
+                woc(f"*patch = {patch._patch_name()};")
+                woc(f"*patch_size = sizeof({patch._patch_name()});")
             woc(f"*offset = 0x{patch.addr-BASE:x};")
             woc("break;")
         woc("default:", -1)

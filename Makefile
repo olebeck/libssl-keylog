@@ -6,9 +6,9 @@ STRIP := arm-vita-eabi-strip
 
 CFLAGS += -Wl,-q -nostdlib
 
-SRC_LIBSSL_KEYLOG := tai.c patch.c inject.c tls-keylog.c libssl-keylog-main.c
-SRC_PSN_REDIRECT := tai.c patch.c inject.c http-rewrite.c xmpp-rewrite.c psn-redirect-main.c
-SRC_PACKET_CAPTURE := tai.c patch.c inject.c tls-keylog.c tcp-proxy.c packet-capture-main.c
+SRC_COMMON := tai.c patch.c inject.c
+SRC_LIBSSL_KEYLOG := $(SRC_COMMON) tls-keylog.c main-libssl-keylog.c
+SRC_PSN_REDIRECT := $(SRC_COMMON) http-rewrite.c xmpp-rewrite.c main-psn-redirect.c
 
 LIBS_KERNEL += \
 	-ltaihenForKernel_stub -ltaihenModuleUtils_stub \
@@ -17,7 +17,7 @@ LIBS_KERNEL += \
 	-lSceSysmemForDriver_stub  -lSceSysclibForDriver_stub \
 	-lSceModulemgrForDriver_stub -lSceNetPsForDriver_stub
 
-all: libssl-keylog.skprx psn-redirect.skprx capture-proxy.a
+all: libssl-keylog.skprx psn-redirect.skprx
 
 %.skprx: %.velf
 	vita-make-fself -c -e libssl-keylog.yml $< $@
@@ -32,14 +32,11 @@ libssl-keylog.elf: $(SRC_LIBSSL_KEYLOG:.c=.o)
 psn-redirect.elf: $(SRC_PSN_REDIRECT:.c=.o)
 	$(CC) $(CFLAGS) $^ $(LIBS_KERNEL) -lSceSysrootForDriver_stub -o $@
 
-capture-proxy.a: $(SRC_PACKET_CAPTURE:.c=.o)
-	ar rcs $@ $^
-
 inject.h: injects.py
 	python injects.py
 
 clean:
-	rm -f capture-proxy.a
+	rm -f psn-redirect.elf psn-redirect.skprx
 	rm -f libssl-keylog.elf libssl-keylog.velf libssl-keylog.skprx
 	rm -f $(SRC_LIBSSL_KEYLOG:.c=.o)
 	rm -f $(SRC_PACKET_CAPTURE:.c=.o)

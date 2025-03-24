@@ -12,7 +12,7 @@ class SSLKeylogPatch(Patch):
     _filename = "vs0/sys/external/libssl.suprx.elf"
     _extra_files = ["lssl.suprx.elf"]
     def patch_name(self) -> str:
-        return f"ssl_keylog_0x{self.addr:08x}_0x{self.syms['SceIoOpen']:08x}"
+        return "ssl_keylog"
 
     _imports = {
         "SceIoOpen": 0x6C60AC61
@@ -47,7 +47,7 @@ class SSLPrintErrorsPatch(Patch):
     }
 
     def patch_name(self) -> str:
-        return f"ssl_print_errors_0x{self.addr:08x}_0x{self.syms['SceIoOpen']:08x}"
+        return "ssl_print_errors"
 
     _code = (
         "push {lr}\n"
@@ -85,7 +85,7 @@ class PsnRedirectPatch(Patch):
     _filename = "vs0/sys/external/libhttp.suprx.elf"
     _extra_files = ["lhttp.suprx.elf"]
     def patch_name(self):
-        return f"psn_redirect_0x{self.addr:08x}_0x{self.syms['sceAppMgrIsNonGameProgram']:08x}"
+        return "psn_redirect"
 
     _imports = {
         "sceAppMgrIsNonGameProgram": 0x5F22E192,
@@ -193,8 +193,8 @@ class ShellCACheckPatch(Patch):
 class ShellXMPPRedirect(Patch):
     _filename = "vs0/vsh/shell/shell.self.elf"
     def patch_name(self):
-        return f"shell_xmpp_redirect_patch_0x{self.addr:08x}_0x{self.syms['sceAppMgrReleaseBgmPort']:08x}"
-    
+        return "shell_xmpp_redirect_patch"
+
     _imports = {
         "sceAppMgrReleaseBgmPort": 0xF3717E37,
     }
@@ -222,8 +222,11 @@ class Matching2TlsPortPatch(Patch):
     def patch_name(self):
         return "np_matching2_tls_patch"
     
-    _code = (
-        "movw r1, #0xd98\n"
+    _code = ( # 8 bytes of nops
+        "nop\n"
+        "nop\n"
+        "nop\n"
+        "nop\n"
     )
 
     @staticmethod
@@ -245,11 +248,94 @@ class Matching2TlsPortPatch(Patch):
         return BASE+off+start, {}
 
 
+class Matching2HostPatch(Patch):
+    _filename = "vs0/sys/external/np_matching2.suprx.elf"
+    def patch_name(self):
+        return "np_matching2_host_patch"
+
+    _imports = {
+        "sceKernelGetMemBlockBase": 0xB8EF5818,
+    }
+    
+    _code = (
+        "mov  r0, #0x0\n" # out = 0 to get length
+        "mov r1, r10\n" # np_titleid
+        "ldr  r2, [sp,#0x18]\n" # np_env
+        "movw r3, #0xd98\n" # magic value
+        "blx  sceKernelGetMemBlockBase\n" # r0 = out; r1 = np_titleid; r2 = np_env; r3 = magic
+        "bl   allocate_pool\n" # allocate; r0 = returned length
+        
+        "mov  r1, r10\n" # np_titleid
+        "ldr  r2, [sp,#0x18]\n" # np_env
+        "movw r3, #0xd98\n" # magic value
+        "blx  sceKernelGetMemBlockBase\n" # call again with buffer
+        "mov  r8, r0\n" # r8 = where the url gets copied from
+        "b    patch_end\n" # goto end
+    )
+
+    @staticmethod
+    def find_patch_location(data: bytes) -> tuple[int, dict[str, int]]:
+        start_needle = bytes(ks.asm("""
+            ldr  r3, [r3]
+            str  r3, [sp, #0x24]
+            adds r4, r0, #0
+            strd r2, r1, [sp, #0x14]
+            cmp  r2, #0
+            bne  #0x18
+            movw r0, #0x8605
+            movt r0, #0x8055
+        """)[0])
+
+        get_nptitleid_needle = bytes(ks.asm("""
+            adds r0, r4, #0
+            mov  r1, sl
+            movs r2, #0xd
+        """)[0])
+
+        allocate_needle = bytes(ks.asm("""
+            add    r0, fp
+            adds.w r0, r0, sl
+            adds.w r0, r0, sb
+            adds.w r0, r0, r8
+            adds   r0, r0, r7
+            adds   r0, r0, r6
+            adds   r0, r0, r5
+            add.w  sb, r0, r4
+            add.w  sb, sb, #1
+            mov    r0, sb
+        """)[0])
+        
+        end_needle = bytes(ks.asm("""
+            ldr   r0, [sp, #0x14]
+            str.w r8, [r0]
+            movs  r0, #0
+        """)[0])
+
+        start = data.find(start_needle)
+        end = data.find(end_needle, start)
+        get_nptitleid_pos = data.find(get_nptitleid_needle, start, end)
+        allocate_pos = data.find(allocate_needle, start, end)+len(allocate_needle)
+
+        dis1 = list(cs.disasm(data[get_nptitleid_pos+6:], get_nptitleid_pos+6, 1))
+        assert dis1[0].mnemonic == "blx"
+
+        dis2 = list(cs.disasm(data[allocate_pos:], allocate_pos, 1))
+        assert dis2[0].mnemonic == "bl"
+        allocate = insn_b_to_addr(dis2[0])
+
+        patch_pos = get_nptitleid_pos + 10
+
+        return BASE+patch_pos, {
+            "patch_end": BASE+end,
+            "allocate_pool": BASE+allocate,
+        }
+
+
 def main():
     with open("inject.h", "w") as f_h, open("inject.c", "w") as f_c:
         source, header = generate_all_patches(
             SSLKeylogPatch, SSLPrintErrorsPatch, SSLNoVerifyPatch,
-            PsnRedirectPatch, ShellCACheckPatch, ShellXMPPRedirect, Matching2TlsPortPatch
+            PsnRedirectPatch, ShellCACheckPatch, ShellXMPPRedirect, Matching2TlsPortPatch, Matching2HostPatch
         )
         f_h.write(header)
         f_c.write(source)

@@ -17,11 +17,22 @@ static SceUID open_id = -1;
 
 static SceUID keylog_file = -1;
 
+#if NET_LOG
+static SceUID keylog_socket = -1;
 static bool with_net_log = false;
-static SceUID net_log_socket = -1;
-static bool net_log_need_connect = true;
-static SceNetSockaddrIn keylog_target_addr;
-static uint64_t account_id;
+
+#define MULTICAST_IP   0x010000ef  // 239.0.0.1 in hex
+#define MULTICAST_PORT 12345
+
+#define HTONS(port) ((uint16_t)((((port) >> 8) & 0xFF) | (((port) & 0xFF) << 8))) 
+
+static const SceNetSockaddrIn MULTICAST_ADDR = {
+    .sin_len    = sizeof(SceNetSockaddrIn),
+    .sin_family = SCE_NET_AF_INET,
+    .sin_port   = HTONS(MULTICAST_PORT),
+    .sin_addr   = { .s_addr = MULTICAST_IP }
+};
+#endif
 
 void do_ssl_keylog(const char* ssl_ctx, const char* ssl_ctx_2);
 
@@ -43,6 +54,25 @@ SceUID hook_user_open(const char *path, int flags, SceMode mode, void *args) {
     }
 }
 
+#if NET_LOG
+void send_netlog(void* data, size_t len, int retry) {
+    if(retry > 3) {
+        return;
+    }
+    if(keylog_socket < 0) { // create socket
+        keylog_socket = ksceNetSocket("keylog-multicast", SCE_NET_AF_INET, SCE_NET_SOCK_DGRAM, 0);
+    }
+
+    int ret = ksceNetSendto(keylog_socket, data, len, 0, (SceNetSockaddr*)&MULTICAST_ADDR, sizeof(MULTICAST_ADDR));
+    if(ret < 0) {
+        ksceKernelPrintf("failed to send keylog %d\n", ret);
+        ksceNetClose(keylog_socket);
+        keylog_socket = -1;
+        send_netlog(data, len, retry+1);
+    }
+}
+#endif
+
 void do_ssl_keylog(const char* ssl_ctx, const char* ssl_ctx_2) {
     char client_random[0x20];
     char master_key[0x30];
@@ -54,47 +84,21 @@ void do_ssl_keylog(const char* ssl_ctx, const char* ssl_ctx_2) {
     char master_key_hex[0x30*2+1];
     print_hex(client_random, client_random_hex, 0x20);
     print_hex(master_key, master_key_hex, 0x30);
-    int len = snprintf(out_buf, 256, "CLIENT_RANDOM %s %s\n", client_random_hex, master_key_hex);
+    int len = snprintf(out_buf, sizeof(out_buf), "CLIENT_RANDOM %s %s\n", client_random_hex, master_key_hex);
+    out_buf[len] = 0;
 
     ksceKernelPrintf(out_buf);
     if(keylog_file > 0) {
         ksceIoWrite(keylog_file, out_buf, len);
     }
-
+    
+    #if NET_LOG
     if(with_net_log) {
-        if(net_log_need_connect) {
-            if(net_log_socket > 0) {
-                ksceNetSocketClose(net_log_socket);
-                net_log_socket = -1;
-            }
-            net_log_socket = ksceNetSocket("keylog_net_sender", SCE_NET_AF_INET, SCE_NET_SOCK_STREAM, 0);
-            if(net_log_socket < 0) {
-                ksceKernelPrintf("failed to create socket 0x%08x\n", net_log_socket);
-            }
-            ksceKernelPrintf("ssl_keylog_net: connecting\n");
-            int ret = ksceNetConnect(net_log_socket, (SceNetSockaddr*)&keylog_target_addr, sizeof(keylog_target_addr));
-            if(ret < 0) {
-                ksceKernelPrintf("failed to connect to keylog server 0x%08x\n", ret);
-            } else {
-                uint64_t header[2];
-                header[0] = 0x676c79656b736c74; // tlskeylg
-                header[1] = account_id;
-                ret = ksceNetSend(net_log_socket, &header, sizeof(header), 0);
-                if(ret < 0) {
-                    ksceKernelPrintf("failed to send keylog header 0x%08x\n", ret);
-                } else {
-                    net_log_need_connect = false;
-                }
-            }
-        }
-        if(!net_log_need_connect) {
-            int ret = ksceNetSend(net_log_socket, out_buf, len, 0);
-            if(ret < 0) {
-                ksceKernelPrintf("failed to write to keylog server 0x%08x\n", ret);
-                net_log_need_connect = true;
-            }
-        }
+        // send twice to make it less likely to be lost
+        send_netlog(out_buf, len+1, 0);
+        send_netlog(out_buf, len+1, 0);
     }
+    #endif
 }
 
 
@@ -117,13 +121,10 @@ void tls_keylog_patch_func(int pid, const char* path) {
 }
 
 
-void tls_keylog_init(SceNetSockaddrIn* keylog_addr, uint64_t _account_id) {
-    if(keylog_addr != NULL) {
-        keylog_target_addr = *keylog_addr;
-        with_net_log = true;
-    }
-    account_id = _account_id;
-
+void tls_keylog_init(bool with_net) {
+    #if NET_LOG
+    with_net_log = with_net;
+    #endif
     // hook to get a way to talk to the kernel module from the patch
     open_id = taiHookFunctionExportForKernel(KERNEL_PID, &open_ref, "SceIofilemgr", TAI_ANY_LIBRARY, 0xCC67B6FD, hook_user_open);
     keylog_file = ksceIoOpen("ux0:data/tls-keylog.txt", SCE_O_CREAT|SCE_O_APPEND|SCE_O_WRONLY, 6);

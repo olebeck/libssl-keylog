@@ -28,3 +28,7 @@ int get_ShellXMPPRedirect(const char** patch, int* offset, int* patch_size, unsi
 
 // Matching2TlsPortPatch
 int get_Matching2TlsPortPatch(const char** patch, int* offset, int* patch_size, unsigned int module_nid);
+
+
+// Matching2HostPatch
+int get_Matching2HostPatch(const char** patch, int* offset, int* patch_size, unsigned int module_nid);

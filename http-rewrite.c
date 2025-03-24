@@ -113,6 +113,10 @@ void http_rewrite_init(const replacement_t* replacements, int replacement_num) {
     }
 }
 
+void sceNetResolverDestroy_hook() {
+    
+}
+
 void http_rewrite_release() {
     if(sceAppMgrIsNonGameProgram_hook_id > 0) {
         taiHookReleaseForKernel(sceAppMgrIsNonGameProgram_hook_id, sceAppMgrIsNonGameProgram_hook_ref);

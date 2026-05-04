@@ -1,12 +1,1 @@
-*.elf
-*.velf
-*.skprx
-*.o
-inject.bin
-inject.o
-inject.txt
-lssl.suprx
-vita-unmake-fself.exe
-__pycache__
-*.a
-.vscode/settings.json
+/build

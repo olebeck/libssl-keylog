@@ -1,0 +1,73 @@
+name: CMake Build and Release
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+      
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y cmake xz-utils
+    
+      - name: Vitasdk
+        run: |
+          git clone https://github.com/vitasdk/vdpm
+          cd vdpm
+          ./bootstrap-vitasdk.sh
+          export VITASDK=/usr/local/vitasdk
+          export PATH=$PATH:$VITASDK/bin
+          echo "VITASDK=/usr/local/vitasdk" >> $GITHUB_ENV
+          echo "PATH=${PATH}:/usr/local/vitasdk/bin" >> $GITHUB_ENV
+
+      - name: get stai
+        run: |
+          wget https://github.com/olebeck/stai/releases/download/prerelease-c7f6f58/stai-vdpm-package.tar.xz
+          ./vdpm/vdpm stai-vdpm-package.tar.xz
+
+      - name: Build
+        run: |
+          cmake -Bbuild -S . -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --config Release --target all
+
+      - name: Determine release tag
+        id: set_tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "release_tag=${{ github.event.inputs.tag_name }}" >> $GITHUB_OUTPUT
+            echo "manual_release=true" >> $GITHUB_OUTPUT
+          else
+            short_sha=$(echo "${GITHUB_SHA}" | cut -c1-7)
+            echo "release_tag=prerelease-${short_sha}" >> $GITHUB_OUTPUT
+            echo "manual_release=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.set_tag.outputs.release_tag }}
+          name: ${{ steps.set_tag.outputs.release_tag }}
+          body: |
+            Build from ${{ github.sha }}
+          draft: false
+          prerelease: ${{ steps.set_tag.outputs.manual_release == 'false' }}
+          files: |
+            build/libssl-keylog.suprx
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

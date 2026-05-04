@@ -5,8 +5,8 @@ in a format which wireshark can use to decrypt tls sessions \
 http://udn.realityripple.com/docs/Mozilla/Projects/NSS/Key_Log_Format
 
 ### usage
-place the plugin `*KERNEL` in `config.txt`
-note: if you are using a firmware higher than 3.63 you need the -363 version
+1. install stai https://github.com/olebeck/stai
+2. place the plugin `*ALL` in `config.txt`
 
 get your vita stdout on your pc, use a small script or grep to filter out the tls logs
 
@@ -16,6 +16,3 @@ example:\
 
 connect your vita to a network your pc can intercept and setup keylog file in wireshark
 https://wiki.wireshark.org/TLS.md#using-the-pre-master-secret
-
-
-only tested on 3.60 and 3.68

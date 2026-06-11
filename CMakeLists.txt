@@ -24,6 +24,7 @@ add_executable(libssl-keylog
 
 target_link_libraries(libssl-keylog PRIVATE
     SceLibKernel_stub
+    SceIofilemgr_stub
     stai_stub
 )
 

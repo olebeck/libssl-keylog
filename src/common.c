@@ -28,7 +28,6 @@ void tohex(char* dst, char* data, size_t len) {
         dst[i * 2 + 0] = hex[(data[i] >> 4) & 0xf];
         dst[i * 2 + 1] = hex[(data[i] >> 0) & 0xf];
     }
-    dst[len * 2] = '\0';
 }
 
 void* memset(void* dst, int ch, size_t len) {

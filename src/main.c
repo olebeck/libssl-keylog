@@ -1,5 +1,6 @@
 #include <psp2/kernel/modulemgr.h>
 #include <psp2/kernel/clib.h>
+#include <psp2/io/fcntl.h>
 #include <stdbool.h>
 #include <assert.h>
 
@@ -48,14 +49,41 @@ typedef struct SSL {
 static_assert(offsetof(SSL, s3) == 0x54);
 static_assert(offsetof(SSL, session) == 0xd0);
 
+static void write_keylog(char* buf, size_t size) {
+    static SceUID keylog_fd = -1;
+    if(keylog_fd < 0) {
+        keylog_fd = sceIoOpen("ux0:data/keylog.txt", SCE_O_CREAT | SCE_O_APPEND | SCE_O_WRONLY, 0666);
+    }
+    if(keylog_fd < 0) {
+        sceClibPrintf("[libssl-keylog]: open keylog: %08x\n", keylog_fd);
+        return;
+    }
+    int ret = sceIoWrite(keylog_fd, buf, size);
+    if(ret < 0) {
+        sceIoClose(keylog_fd);
+        keylog_fd = -1;
+    }
+}
+
 STAI_HOOK(int, tls1_setup_key_block, SSL* s) {
     int ret = STAI_HOOK_CONTINUE(tls1_setup_key_block, s);
 
-    char client_random_hex[32*2 + 1];
-    tohex(client_random_hex, s->s3->client_random, 32);
-    char master_key_hex[48*2 + 1];
-    tohex(master_key_hex, s->session->master_key, 48);
-    sceClibPrintf("CLIENT_RANDOM %s %s\n", client_random_hex, master_key_hex);
+    const char prefix[] = "CLIENT_RANDOM ";
+    char buf[sizeof(prefix)-1 + 32*2 + 1 + 48*2 + 1 + 1];
+    sceClibMemset(buf, 0, sizeof(buf));
+    char* p = buf;
+    sceClibMemcpy(p, prefix, sizeof(prefix));
+    p += sizeof(prefix)-1;
+
+    tohex(p, s->s3->client_random, 32);
+    p += 32*2;
+    *p++ = ' ';
+    tohex(p, s->session->master_key, 48);
+    p += 48*2;
+    *p++ = '\n';
+    *p = 0;
+    sceClibPrintf(buf);
+    write_keylog(buf, p - buf);
     return ret;
 }
 

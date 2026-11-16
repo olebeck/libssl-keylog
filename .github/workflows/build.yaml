@@ -33,13 +33,13 @@ jobs:
           ./bootstrap-vitasdk.sh
           export VITASDK=/usr/local/vitasdk
           export PATH=$PATH:$VITASDK/bin
-          echo "VITASDK=/usr/local/vitasdk" >> $GITHUB_ENV
-          echo "PATH=${PATH}:/usr/local/vitasdk/bin" >> $GITHUB_ENV
+          echo "VITASDK=${VITASDK}" >> $GITHUB_ENV
+          echo "PATH=${PATH}" >> $GITHUB_ENV
 
       - name: get stai
         run: |
-          wget https://github.com/olebeck/stai/releases/download/prerelease-c7f6f58/stai-vdpm-package.tar.xz
-          ./vdpm/vdpm stai-vdpm-package.tar.xz
+          wget https://github.com/olebeck/stai/releases/download/v0.9.0/stai-0.0.1-1-vita.pkg.tar.xz
+          vdpm pacman -U ./stai-vdpm-package.tar.xz
 
       - name: Build
         run: |

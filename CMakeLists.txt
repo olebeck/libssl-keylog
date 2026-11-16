@@ -20,11 +20,14 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${COMPILER_FLAGS} -std=gnu11")
 add_executable(libssl-keylog
     src/main.c
     src/common.c
+    src/cfg.c
 )
 
 target_link_libraries(libssl-keylog PRIVATE
     SceLibKernel_stub
     SceIofilemgr_stub
+    SceSysmodule_stub
+    SceNet_stub_weak
     stai_stub
 )
 

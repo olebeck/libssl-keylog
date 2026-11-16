@@ -13,6 +13,6 @@ typedef struct offset_t {
 
 int find_offset(offset_t* offsets, size_t offsets_size, uintptr_t text_base, uintptr_t* offset);
 
-void tohex(char* dst, char* data, size_t len);
+char* tohex(char* dst, char* data, size_t len);
 
 void* memset(void* dst, int ch, size_t len);

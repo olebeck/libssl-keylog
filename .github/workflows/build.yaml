@@ -4,10 +4,8 @@ on:
   push:
     branches:
       - master
-  workflow_dispatch:
-    inputs:
-      tag_name:
-        required: true
+    tags:
+      v*
 
 permissions:
   contents: write
@@ -17,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           submodules: true
       
@@ -49,13 +47,13 @@ jobs:
       - name: Determine release tag
         id: set_tag
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "release_tag=${{ github.event.inputs.tag_name }}" >> $GITHUB_OUTPUT
-            echo "manual_release=true" >> $GITHUB_OUTPUT
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            echo "release_tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+            echo "is_prerelease=false" >> $GITHUB_OUTPUT
           else
-            short_sha=$(echo "${GITHUB_SHA}" | cut -c1-7)
+            short_sha=$(echo "${{ github.sha }}" | cut -c1-7)
             echo "release_tag=prerelease-${short_sha}" >> $GITHUB_OUTPUT
-            echo "manual_release=false" >> $GITHUB_OUTPUT
+            echo "is_prerelease=true" >> $GITHUB_OUTPUT
           fi
 
       - name: Create GitHub release
@@ -66,7 +64,7 @@ jobs:
           body: |
             Build from ${{ github.sha }}
           draft: false
-          prerelease: ${{ steps.set_tag.outputs.manual_release == 'false' }}
+          prerelease: ${{ steps.set_tag.outputs.is_prerelease }}
           files: |
             build/libssl-keylog.suprx
         env:

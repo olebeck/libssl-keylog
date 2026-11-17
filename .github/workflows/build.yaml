@@ -16,55 +16,32 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
-        with:
-          submodules: true
       
       - name: Install dependencies
         run: |
           sudo apt update
           sudo apt install -y cmake xz-utils
     
-      - name: Vitasdk
-        run: |
-          git clone https://github.com/vitasdk/vdpm
-          cd vdpm
-          ./bootstrap-vitasdk.sh
-          export VITASDK=/usr/local/vitasdk
-          export PATH=$PATH:$VITASDK/bin
-          echo "VITASDK=${VITASDK}" >> $GITHUB_ENV
-          echo "PATH=${PATH}" >> $GITHUB_ENV
+      - name: Install VitaSDK
+        uses: olebeck/setup-vitasdk@v1
 
       - name: get stai
         run: |
-          wget https://github.com/olebeck/stai/releases/download/v0.9.0/stai-0.0.1-1-vita.pkg.tar.xz
-          vdpm pacman --noconfirm -U ./stai-0.0.1-1-vita.pkg.tar.xz
+          vdpm pacman --noconfirm -U https://github.com/olebeck/stai/releases/download/v0.9.0/stai-0.0.1-1-vita.pkg.tar.xz
 
       - name: Build
         run: |
           cmake -Bbuild -S . -DCMAKE_BUILD_TYPE=Release
           cmake --build build --config Release --target all
 
-      - name: Determine release tag
-        id: set_tag
-        run: |
-          if [ "${{ github.ref_type }}" = "tag" ]; then
-            echo "release_tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
-            echo "is_prerelease=false" >> $GITHUB_OUTPUT
-          else
-            short_sha=$(echo "${{ github.sha }}" | cut -c1-7)
-            echo "release_tag=prerelease-${short_sha}" >> $GITHUB_OUTPUT
-            echo "is_prerelease=true" >> $GITHUB_OUTPUT
-          fi
-
       - name: Create GitHub release
         uses: softprops/action-gh-release@v3
         with:
-          tag_name: ${{ steps.set_tag.outputs.release_tag }}
-          name: ${{ steps.set_tag.outputs.release_tag }}
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('prerelease-{0}', github.sha) }}
           body: |
             Build from ${{ github.sha }}
           draft: false
-          prerelease: ${{ steps.set_tag.outputs.is_prerelease }}
+          prerelease: ${{ github.ref_type != 'tag' }}
           files: |
             build/libssl-keylog.suprx
         env:
